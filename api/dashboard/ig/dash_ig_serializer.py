@@ -1,7 +1,8 @@
 from rest_framework import serializers
 import json
 
-from db.task import InterestGroup
+from django.db.models import Sum
+from db.task import InterestGroup, UserIgLvlLink
 
 
 class InterestGroupSerializer(serializers.ModelSerializer):
@@ -122,3 +123,27 @@ class InterestGroupRequestSerializer(serializers.ModelSerializer):
             "category": {"required": True},
             "icon": {"required": True},
         }
+
+class InterestGroupMemberSerializer(serializers.ModelSerializer):
+    """Serializer for IG members, used in the IG members API."""
+    
+    user_id = serializers.UUIDField(source="user.id")    
+    full_name = serializers.CharField(source="user.full_name")
+    muid = serializers.CharField(source="user.muid")
+    profile_pic = serializers.CharField(source="user.profile_pic")
+    
+    ig_level = serializers.IntegerField(source="level.level_order")   
+    ig_karma = serializers.IntegerField()
+    
+    joined_at = serializers.DateTimeField(source="created_at")
+    class Meta:
+        model = UserIgLvlLink
+        fields = [
+            "user_id",
+            "full_name",
+            "muid",
+            "profile_pic",
+            "ig_level",
+            "ig_karma",
+            "joined_at",  
+        ]

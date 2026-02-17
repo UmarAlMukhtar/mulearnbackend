@@ -1,16 +1,18 @@
-from django.db.models import Count
+from django.db.models import Count, Sum, Q
 from rest_framework.views import APIView
 
-from db.task import InterestGroup
+from db.task import InterestGroup, UserIgLvlLink
 from utils.permission import CustomizePermission
 from utils.permission import JWTUtils, role_required
 from utils.response import CustomResponse
 from utils.types import RoleType, WebHookActions, WebHookCategory
 from utils.utils import CommonUtils, DiscordWebhooks
 from .dash_ig_serializer import (
+    InterestGroupMemberSerializer,
     InterestGroupSerializer,
     InterestGroupCreateUpdateSerializer,
     InterestGroupRequestSerializer,
+    InterestGroupMemberSerializer,
 )
 import json
 from django.utils.decorators import method_decorator
@@ -22,7 +24,26 @@ from db.user import Role
 class InterestGroupAPI(APIView):
     authentication_classes = [CustomizePermission]
 
-    def get(self, request):
+    def get(self, request, pk=None):
+        
+        # If specific IG requested
+        if pk:
+            ig = InterestGroup.objects.select_related(
+                "created_by", "updated_by"
+            ).filter(id=pk).first()
+
+            if not ig:
+                return CustomResponse(
+                    general_message="Invalid IG ID"
+                ).get_failure_response()
+
+            serializer = InterestGroupSerializer(ig)
+
+            return CustomResponse(
+                response={"interestGroup": serializer.data}
+            ).get_success_response()
+            
+         # Else return full list (existing logic)
         ig_queryset = (
             InterestGroup.objects.select_related("created_by", "updated_by")
             .prefetch_related("user_ig_link_ig")
@@ -494,4 +515,48 @@ class InterestGroupListApi(APIView):
 
         return CustomResponse(
             response={"interestGroup": serializer.data}
+        ).get_success_response()
+        
+
+class InterestGroupMembersAPI(APIView):
+    
+    def get(self, request, pk):
+        if not InterestGroup.objects.filter(id=pk).exists():
+            return CustomResponse(
+                general_message="Invalid Interest Group ID"
+            ).get_failure_response()
+        
+        queryset = (
+            UserIgLvlLink.objects
+            .filter(ig_id=pk)
+            .select_related("user", "level")
+            .annotate(
+                ig_karma=Sum(
+                    "user__karma_activity_log_user__karma",
+                    filter=Q(
+                        user__karma_activity_log_user__task__ig_id=pk,
+                        user__karma_activity_log_user__appraiser_approved=True
+                    )
+                )
+            )
+        )
+        
+        ordering = request.GET.get("ordering", "-ig_karma")
+
+        allowed_ordering = [
+            "ig_karma",
+            "-ig_karma",
+            "level__level_order",
+            "-level__level_order",
+            "user__full_name",
+            "-user__full_name",
+        ]
+
+        if ordering in allowed_ordering:
+            queryset = queryset.order_by(ordering)
+    
+        serializer = InterestGroupMemberSerializer(queryset, many=True)
+
+        return CustomResponse(
+            response={"members": serializer.data}
         ).get_success_response()
