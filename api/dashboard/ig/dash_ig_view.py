@@ -1,7 +1,8 @@
-from django.db.models import Count, Sum, Q
+from django.db.models import Case, Count, IntegerField, Sum, Q, Value, When
+from django.db.models.functions import Coalesce
 from rest_framework.views import APIView
 
-from db.task import InterestGroup, UserIgLvlLink
+from db.task import InterestGroup, UserIgLink, UserIgLvlLink
 from utils.permission import CustomizePermission
 from utils.permission import JWTUtils, role_required
 from utils.response import CustomResponse
@@ -527,36 +528,53 @@ class InterestGroupMembersAPI(APIView):
             ).get_failure_response()
         
         queryset = (
-            UserIgLvlLink.objects
+            UserIgLink.objects
             .filter(ig_id=pk)
-            .select_related("user", "level")
+            .select_related("user")
+            .prefetch_related(
+                "user__user_ig_link_user__ig",
+                "user__user_organization_link_user__org",
+                "user__user_ig_lvl_link_user__level",
+            )
             .annotate(
-                ig_karma=Sum(
-                    "user__karma_activity_log_user__karma",
-                    filter=Q(
-                        user__karma_activity_log_user__task__ig_id=pk,
-                        user__karma_activity_log_user__appraiser_approved=True
-                    )
+                ig_karma=Coalesce(
+                    Sum(
+                        Case(
+                            When(
+                                user__karma_activity_log_user__task__ig_id=pk,
+                                user__karma_activity_log_user__appraiser_approved=True,
+                                then="user__karma_activity_log_user__karma"
+                            ),
+                            default=Value(0),
+                            output_field=IntegerField(),
+                        )
+                    ),
+                    Value(0)
                 )
             )
-        )
+        )              
+
         
-        ordering = request.GET.get("ordering", "-ig_karma")
+        paginated_queryset = CommonUtils.get_paginated_queryset(
+            queryset,
+            request,
+            ["user__full_name", "user__muid"], 
+            {
+                "full_name": "user__full_name",
+                "muid": "user__muid",
+                "ig_karma": "ig_karma",
+            },
+            # default_order="-ig_karma"
+        )
 
-        allowed_ordering = [
-            "ig_karma",
-            "-ig_karma",
-            "level__level_order",
-            "-level__level_order",
-            "user__full_name",
-            "-user__full_name",
-        ]
+        serializer = InterestGroupMemberSerializer(
+            paginated_queryset.get("queryset"),
+            many=True,
+            context={"request": request}
+        )
 
-        if ordering in allowed_ordering:
-            queryset = queryset.order_by(ordering)
-    
-        serializer = InterestGroupMemberSerializer(queryset, many=True)
+        return CustomResponse().paginated_response(
+            data=serializer.data,
+            pagination=paginated_queryset.get("pagination")
+        )
 
-        return CustomResponse(
-            response={"members": serializer.data}
-        ).get_success_response()

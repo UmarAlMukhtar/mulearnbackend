@@ -2,7 +2,7 @@ from rest_framework import serializers
 import json
 
 from django.db.models import Sum
-from db.task import InterestGroup, UserIgLvlLink
+from db.task import InterestGroup, UserIgLink
 
 
 class InterestGroupSerializer(serializers.ModelSerializer):
@@ -127,23 +127,76 @@ class InterestGroupRequestSerializer(serializers.ModelSerializer):
 class InterestGroupMemberSerializer(serializers.ModelSerializer):
     """Serializer for IG members, used in the IG members API."""
     
-    user_id = serializers.UUIDField(source="user.id")    
+    id = serializers.UUIDField(source="user.id")    
     full_name = serializers.CharField(source="user.full_name")
     muid = serializers.CharField(source="user.muid")
-    profile_pic = serializers.CharField(source="user.profile_pic")
     
-    ig_level = serializers.IntegerField(source="level.level_order")   
+    profile_pic = serializers.SerializerMethodField()
+    ig_level = serializers.SerializerMethodField()
+    level = serializers.CharField(
+        source="user.user_lvl_link_user.level.name",
+        default=None
+        )
+    # interest_groups = serializers.SerializerMethodField()
+    # organizations = serializers.SerializerMethodField()
+
     ig_karma = serializers.IntegerField()
-    
     joined_at = serializers.DateTimeField(source="created_at")
+
     class Meta:
-        model = UserIgLvlLink
+        model = UserIgLink
         fields = [
-            "user_id",
+            "id",
             "full_name",
             "muid",
             "profile_pic",
+            "level",    
             "ig_level",
             "ig_karma",
-            "joined_at",  
+            # "interest_groups",
+            # "organizations",
+            "joined_at",
         ]
+
+    def get_profile_pic(self, obj):
+        request = self.context.get("request")
+
+        if not request:
+            return None
+
+        return request.build_absolute_uri(
+            f"/muback-media/user/profile/{obj.user.id}.png"
+        )
+
+    def get_ig_level(self, obj):
+        lvl = obj.user.user_ig_lvl_link_user.filter(
+            ig_id=obj.ig_id
+        ).select_related("level").first()
+
+        if lvl:
+            return lvl.level.level_order
+        return None
+
+    # def get_interest_groups(self, obj):
+    #     ig_links = obj.user.user_ig_link_user.select_related("ig").all()
+
+    #     return [
+    #         {
+    #             "id": link.ig.id,
+    #             "name": link.ig.name,
+    #         }
+    #         for link in ig_links
+    #     ]
+
+    # def get_organizations(self, obj):
+    #     org_links = obj.user.user_organization_link_user.select_related("org").all()
+
+    #     return [
+    #         {
+    #             "id": link.org.id,
+    #             "title": link.org.title,
+    #             "code": link.org.code,
+    #             "org_type": link.org.org_type,
+    #         }
+    #         for link in org_links
+    #     ]
