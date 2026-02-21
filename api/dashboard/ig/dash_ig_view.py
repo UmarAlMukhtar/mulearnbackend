@@ -3,6 +3,7 @@ from django.db.models.functions import Coalesce
 from rest_framework.views import APIView
 
 from db.task import InterestGroup, UserIgLink, UserIgLvlLink
+from db.user import UserRoleLink
 from utils.permission import CustomizePermission
 from utils.permission import JWTUtils, role_required
 from utils.response import CustomResponse
@@ -520,13 +521,34 @@ class InterestGroupListApi(APIView):
         
 
 class InterestGroupMembersAPI(APIView):
-    
+    authentication_classes = [CustomizePermission]
+
     def get(self, request, pk):
         if not InterestGroup.objects.filter(id=pk).exists():
             return CustomResponse(
                 general_message="Invalid Interest Group ID"
             ).get_failure_response()
         
+        user_id = JWTUtils.fetch_user_id(request)
+
+        user_roles = list(
+            UserRoleLink.objects.filter(
+                user_id=user_id,
+                verified=True
+            ).values_list("role__title", flat=True)
+        )
+
+        if RoleType.ADMIN.value in user_roles:
+            pass
+
+        elif RoleType.IG_LEAD_ROLE(ig.code) in user_roles:
+            pass
+
+        else:
+            return CustomResponse(
+                general_message="Permission denied"
+            ).get_failure_response()
+
         queryset = (
             UserIgLink.objects
             .filter(ig_id=pk)
@@ -564,7 +586,6 @@ class InterestGroupMembersAPI(APIView):
                 "muid": "user__muid",
                 "ig_karma": "ig_karma",
             },
-            # default_order="-ig_karma"
         )
 
         serializer = InterestGroupMemberSerializer(
