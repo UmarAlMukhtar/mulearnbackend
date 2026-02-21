@@ -3,7 +3,7 @@ from django.db.models.functions import Coalesce
 from rest_framework.views import APIView
 
 from db.task import InterestGroup, UserIgLink, UserIgLvlLink
-from db.user import UserRoleLink
+from db.user import UserRoleLink, User
 from utils.permission import CustomizePermission
 from utils.permission import JWTUtils, role_required
 from utils.response import CustomResponse
@@ -599,3 +599,64 @@ class InterestGroupMembersAPI(APIView):
             pagination=paginated_queryset.get("pagination")
         )
 
+
+class InterestGroupLeaderboardAPI(APIView):
+
+    def get(self, request, pk):
+
+        if not InterestGroup.objects.filter(id=pk).exists():
+            return CustomResponse(
+                general_message="Invalid Interest Group ID"
+            ).get_failure_response()
+
+        queryset = (
+            User.objects
+            .filter(
+                user_ig_link_user__ig_id=pk,
+                exist_in_guild=True,
+            )
+            .annotate(
+                total_karma=Coalesce(
+                    Sum(
+                        "karma_activity_log_user__karma",
+                        filter=Q(
+                            karma_activity_log_user__task__ig_id=pk,
+                            karma_activity_log_user__appraiser_approved=True,
+                        ),
+                    ),
+                    Value(0),
+                )
+            )
+            .order_by("-total_karma")
+        )
+
+        paginated_queryset = CommonUtils.get_paginated_queryset(
+            queryset,
+            request,
+            ["full_name", "muid"],
+            {
+                "full_name": "full_name",
+                "karma": "total_karma",
+            },
+        )
+
+        # Add rank manually
+        page = int(request.GET.get("page", 1))
+        per_page = int(request.GET.get("page_size", 10))
+        base_rank = (page - 1) * per_page
+
+        ranked_data = []
+
+        for index, user in enumerate(paginated_queryset["queryset"], start=1):
+            ranked_data.append({
+                "rank": base_rank + index,
+                "id": user.id,
+                "full_name": user.full_name,
+                "muid": user.muid,
+                "total_karma": user.total_karma,
+            })
+
+        return CustomResponse().paginated_response(
+            data=ranked_data,
+            pagination=paginated_queryset.get("pagination")
+        )
